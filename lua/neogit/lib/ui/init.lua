@@ -339,6 +339,63 @@ function Ui:get_filepaths_in_selection()
   return util.deduplicate(paths)
 end
 
+---Returns every hunk that intersects the visual selection, together with the range of the hunk's lines that is
+---selected. `from` and `to` are 1-based indices into `hunk.lines`, suitable for `git.index.generate_patch()`.
+---Selecting a hunk's header does not select any of its lines, but a closed fold counts as selecting everything inside
+---of it. Hunks where none of the selected lines are changes are omitted.
+---@return SelectedHunk[]
+function Ui:get_hunks_in_selection()
+  local first_line = math.min(vim.fn.line("v"), vim.fn.line("."))
+  local last_line = math.max(vim.fn.line("v"), vim.fn.line("."))
+
+  local fold_start = vim.fn.foldclosed(first_line)
+  if fold_start ~= -1 then
+    first_line = fold_start
+  end
+
+  local fold_end = vim.fn.foldclosedend(last_line)
+  if fold_end ~= -1 then
+    last_line = fold_end
+  end
+
+  local hunks = {}
+  local line = first_line
+
+  while line <= last_line do
+    local component = self:_find_component_by_index(line, function(node)
+      return node.options.hunk ~= nil
+    end)
+
+    if component then
+      local hunk = component.options.hunk
+      local header, hunk_last = component:row_range_abs()
+
+      -- The first row of a hunk component is its header, so row `header + n` holds `hunk.lines[n]`
+      local from = math.max(first_line, header + 1) - header
+      local to = math.min(last_line, hunk_last, header + #hunk.lines) - header
+
+      local has_changes = false
+      for i = from, to do
+        if hunk.lines[i]:match("^[+-]") then
+          has_changes = true
+          break
+        end
+      end
+
+      if has_changes then
+        local o = { from = from, to = to, hunk = hunk, __index = hunk }
+        table.insert(hunks, setmetatable(o, o))
+      end
+
+      line = hunk_last + 1
+    else
+      line = line + 1
+    end
+  end
+
+  return hunks
+end
+
 ---@return string|nil
 function Ui:get_commit_under_cursor()
   local cursor = vim.api.nvim_win_get_cursor(0)

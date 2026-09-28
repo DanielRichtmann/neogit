@@ -220,6 +220,21 @@ local function is_jumpable_hunk_line_component(c)
     or c.options.line_hl == "NeogitDiffDelete"
 end
 
+---Applies the inverse of the given hunks to the worktree, after asking the user for permission. Selected hunks only
+---have the lines within their selection reversed.
+---@param hunks (Hunk|SelectedHunk)[]
+---@param message string Confirmation prompt
+local function reverse_hunks(hunks, message)
+  if #hunks == 0 or not input.get_permission(message) then
+    return
+  end
+
+  for _, hunk in ipairs(hunks) do
+    local patch = git.index.generate_patch(hunk, { from = hunk.from, to = hunk.to, reverse = true })
+    git.index.apply(patch, { reverse = true })
+  end
+end
+
 ---Opens the CommitViewBuffer
 ---If already open will close the buffer
 ---@param kind? string
@@ -503,12 +518,19 @@ function M:open(kind)
             end
           end
 
-          if #(hunks or {}) > 0 and input.get_permission(message) then
-            for _, hunk in ipairs(hunks) do
-              local patch = git.index.generate_patch(hunk, { reverse = true })
-              git.index.apply(patch, { reverse = true })
-            end
+          reverse_hunks(hunks or {}, message)
+        end),
+      },
+      v = {
+        [status_maps["Reverse"]] = a.void(function()
+          local hunks = self.buffer.ui:get_hunks_in_selection()
+
+          if #hunks == 0 then
+            notification.info("No changes selected")
+            return
           end
+
+          reverse_hunks(hunks, "Reverse selection?")
         end),
       },
     },
