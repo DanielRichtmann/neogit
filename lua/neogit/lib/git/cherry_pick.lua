@@ -44,40 +44,61 @@ function M.apply(commits, args)
   end
 end
 
+---Builds a GIT_SEQUENCE_EDITOR command that marks each of `commits` as "drop" in the todo list of an interactive
+---rebase. Commits are matched by their abbreviated oid, since that is what git writes to the todo list.
 ---@param commits string[]
----@param src? string
----@param dst string
----@param start? string
----@param checkout_dst? boolean
+---@return string
+local function drop_commits_editor(commits)
+  local abbreviated = util.map(commits, git.rev_parse.abbreviate_commit)
+  local substitute = ([[%%s/\v^(pick|p) (%s)/drop \2/e]]):format(table.concat(abbreviated, "|"))
+
+  return table.concat({
+    vim.fn.shellescape(vim.v.progpath),
+    "--headless",
+    "--clean",
+    "-n",
+    "-c",
+    vim.fn.shellescape(substitute),
+    "-c",
+    "wq",
+  }, " ")
+end
+
+---Moves `commits` from `src` onto `dst`, mirroring `magit--cherry-move`.
+---
+---If `dst` does not exist it is created at `start`. The commits are then picked onto `dst` and removed from `src`,
+---either by resetting `src` (when the commits are at its tip) or by dropping them in an interactive rebase.
+---@param commits string[] Ordered oldest first
+---@param src? string Branch to remove the commits from. When nil, the commits are only picked onto `dst`
+---@param dst string Branch to move the commits onto
+---@param args string[] Arguments for `git cherry-pick`
+---@param start? string Starting point for `dst` if it has to be created
+---@param checkout_dst? boolean Whether `dst` should be checked out once done, instead of `src`
 function M.move(commits, src, dst, args, start, checkout_dst)
   local current = git.branch.current()
 
-  if not git.branch.exists(dst) then
-    git.cli.branch.args(start or "", dst).call { hidden = true }
-    local upstream = git.branch.upstream(start)
-    if upstream then
-      git.branch.set_upstream(upstream, dst)
-    end
+  if not git.branch.exists(dst) and not git.branch.create(dst, start) then
+    return notification.error(("Failed to create branch %q"):format(dst))
   end
 
-  if dst ~= current then
-    git.branch.checkout(dst)
+  if dst ~= current and git.branch.checkout(dst):failure() then
+    return notification.error(("Failed to checkout branch %q"):format(dst))
   end
 
   if not src then
-    return git.cherry_pick.pick(commits, args)
+    return M.pick(commits, args)
   end
 
   local tip = commits[#commits]
   local keep = commits[1] .. "^"
 
-  if not git.cherry_pick.pick(commits, args) then
+  if not M.pick(commits, args) then
     return
   end
 
-  if git.log.is_ancestor(src, tip) then
+  if git.rev_parse.oid(tip) == git.rev_parse.oid(src) then
     git.cli["update-ref"]
-      .message(string.format("reset: moving to %s", keep))
+      .message(("reset: moving to %s"):format(keep))
       .args(git.rev_parse.full_name(src), keep, tip)
       .call()
 
@@ -85,14 +106,18 @@ function M.move(commits, src, dst, args, start, checkout_dst)
       git.branch.checkout(src)
     end
   else
-    git.branch.checkout(src)
+    if git.branch.checkout(src):failure() then
+      return notification.error(("Failed to checkout branch %q"):format(src))
+    end
 
-    local editor = "nvim -c '%g/^pick \\(" .. table.concat(commits, ".*|") .. ".*\\)/norm! dd/' -c 'wq'"
-    local result =
-      git.cli.rebase.interactive.args(keep).in_pty(true).env({ GIT_SEQUENCE_EDITOR = editor }).call()
+    local result = git.cli.rebase.interactive
+      .args(keep)
+      .in_pty(true)
+      .env({ GIT_SEQUENCE_EDITOR = drop_commits_editor(commits) })
+      .call()
 
     if result:failure() then
-      return notification.error("Picking failed - Fix things manually before continuing.")
+      return notification.error("Removing commits failed - Fix things manually before continuing.")
     end
 
     if checkout_dst then
