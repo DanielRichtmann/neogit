@@ -1044,6 +1044,10 @@ Actions:                                      *neogit_cherry_pick_popup_actions*
     branch BRANCH, removing them from the former. When this command succeeds,
     then the same branch is current as before.
 
+    The user is prompted for the starting point of BRANCH, defaulting to the
+    upstream of the current branch, and then for its name. If a branch with
+    that name already exists, the commits are moved onto it instead.
+
     Applying the commits on the other branch or removing them from the current
     branch can lead to conflicts. When that happens, then this command stops
     and you have to resolve the conflicts and then finish the process manually.
@@ -1052,6 +1056,10 @@ Actions:                                      *neogit_cherry_pick_popup_actions*
     This command moves the selected COMMITS from the current branch onto a new
     branch BRANCH, removing them from the former. When this command succeeds,
     then the new branch is checked out.
+
+    The user is prompted for the starting point of BRANCH, defaulting to the
+    upstream of the current branch, and then for its name. If a branch with
+    that name already exists, the commits are moved onto it instead.
 
     Applying the commits on the other branch or removing them from the current
     branch can lead to conflicts. When that happens, then this command stops

@@ -103,6 +103,109 @@ describe("cherry pick popup actions", function()
     fuzzy_finder.value = ""
   end)
 
+  for _, case in ipairs {
+    { action = "spinout", current = "master" },
+    { action = "spinoff", current = "spun" },
+  } do
+    describe(case.action, function()
+      it("moves commits at the tip onto a new branch created at the chosen starting point", function()
+        fuzzy_finder.value = { "origin/master" }
+        input.values = { "spun" }
+
+        actions[case.action](popup { oid("HEAD~1"), oid("HEAD") })
+
+        eq({}, errors)
+        eq({ "A" }, subjects("master"))
+        eq({ "B", "C" }, subjects("spun"))
+        eq(oid("origin/master"), oid("spun~2"))
+        eq(case.current, run { "git", "branch", "--show-current" })
+      end)
+
+      it("removes commits that are not at the tip using a rebase", function()
+        fuzzy_finder.value = { "origin/master" }
+        input.values = { "spun" }
+
+        actions[case.action](popup { oid("HEAD~2"), oid("HEAD~1") })
+
+        eq({}, errors)
+        eq({ "C" }, subjects("master"))
+        eq({ "A", "B" }, subjects("spun"))
+        eq(case.current, run { "git", "branch", "--show-current" })
+      end)
+
+      it("removes commits when rebase.abbreviateCommands is set", function()
+        run { "git", "config", "rebase.abbreviateCommands", "true" }
+        -- A single commit at point is offered as the default cherry, like in magit
+        fuzzy_finder.value = { oid("HEAD~2"), "origin/master" }
+        input.values = { "spun" }
+
+        actions[case.action](popup { oid("HEAD~2") })
+
+        eq({}, errors)
+        eq({ "B", "C" }, subjects("master"))
+        eq({ "A" }, subjects("spun"))
+      end)
+
+      it("prompts for the commit when none is selected", function()
+        fuzzy_finder.value = { oid("HEAD~2"), "origin/master" }
+        input.values = { "spun" }
+
+        actions[case.action](popup {})
+
+        eq({}, errors)
+        eq({ "B", "C" }, subjects("master"))
+        eq({ "A" }, subjects("spun"))
+      end)
+
+      it("moves commits onto an existing branch with the given name", function()
+        run { "git", "branch", "spun", "origin/master" }
+        fuzzy_finder.value = { "origin/master" }
+        input.values = { "spun" }
+
+        actions[case.action](popup { oid("HEAD~1"), oid("HEAD") })
+
+        eq({}, errors)
+        eq({ "A" }, subjects("master"))
+        eq({ "B", "C" }, subjects("spun"))
+      end)
+
+      it("refuses to run while HEAD is detached", function()
+        run { "git", "checkout", "--quiet", "--detach" }
+        refresh_repo()
+        local head = oid("HEAD")
+
+        actions[case.action](popup { oid("HEAD~1"), oid("HEAD") })
+
+        eq({ ("Cannot %s cherries while HEAD is detached"):format(case.action) }, errors)
+        eq(head, oid("HEAD"))
+      end)
+
+      it("refuses to move commits that are not reachable from HEAD", function()
+        run { "git", "checkout", "--quiet", "-b", "other", "origin/master" }
+        run { "git", "commit", "--quiet", "--allow-empty", "--message", "D" }
+        run { "git", "checkout", "--quiet", "master" }
+        refresh_repo()
+
+        fuzzy_finder.value = { "other" }
+
+        actions[case.action](popup {})
+
+        eq({ ("Cannot %s cherries that are not reachable from HEAD"):format(case.action) }, errors)
+        eq({ "A", "B", "C" }, subjects("master"))
+      end)
+
+      it("does nothing when the starting point prompt is aborted", function()
+        fuzzy_finder.value = { nil }
+
+        actions[case.action](popup { oid("HEAD~1"), oid("HEAD") })
+
+        eq({}, errors)
+        eq({ "A", "B", "C" }, subjects("master"))
+        eq(false, git.branch.exists("spun"))
+      end)
+    end)
+  end
+
   describe("donate", function()
     it("removes commits that are not at the tip using a rebase", function()
       run { "git", "branch", "other", "origin/master" }
