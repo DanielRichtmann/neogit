@@ -3,6 +3,7 @@ local util = require("neogit.lib.util")
 local git = require("neogit.lib.git")
 local input = require("neogit.lib.input")
 local notification = require("neogit.lib.notification")
+local config = require("neogit.config")
 
 local CommitSelectViewBuffer = require("neogit.buffers.commit_select_view")
 local FuzzyFinderBuffer = require("neogit.buffers.fuzzy_finder")
@@ -139,47 +140,70 @@ function M.harvest(popup)
   end
 end
 
----@param popup PopupData
----@param checkout boolean Whether to checkout the new branch afterwards (spinoff) or stay on current (spinout)
-local function spin(popup, checkout)
-  local commits = get_commits(popup)
-  if #commits == 0 then
-    return
+---Suggests a name for a branch created at `start`: the branch name of a remote branch, unless a local branch of that
+---name already exists.
+---@param start string
+---@return string|nil
+local function suggest_branch_name(start)
+  for _, remote in ipairs(git.remote.list()) do
+    local name = start:match(("^%s/(.+)$"):format(vim.pesc(remote)))
+    if name and not git.branch.exists(name) then
+      return name
+    end
   end
 
+  return config.values.initial_branch_name
+end
+
+---Moves the selected commits from the current branch onto a new branch, like `magit-cherry-spinout` and
+---`magit-cherry-spinoff`.
+---@param popup PopupData
+---@param verb "Spinout"|"Spinoff"
+---@param checkout boolean Whether to checkout the new branch afterwards (spinoff) or stay on the current one (spinout)
+local function spin(popup, verb, checkout)
   local src = git.branch.current()
   if not src then
-    return notification.error("Cannot spin out/off: not on a branch")
+    return notification.error(("Cannot %s cherries while HEAD is detached"):format(verb:lower()))
   end
 
-  local prompt = checkout and "Spin-off to branch" or "Spin-out to branch"
-  local name = input.get_user_input(prompt, { strip_spaces = true })
-  if not name then
+  local commits = get_cherries(popup, verb)
+  if not commits[1] then
     return
   end
 
-  if git.branch.exists(name) then
-    return notification.error("Branch '" .. name .. "' already exists")
+  if not git.log.is_ancestor(commits[1], src) then
+    return notification.error(("Cannot %s cherries that are not reachable from HEAD"):format(verb:lower()))
   end
 
-  -- git.log.list returns newest-first; move() expects oldest-first so that
-  -- tip = commits[#commits] is HEAD and keep = commits[1]^  is the reset point.
-  local ordered = util.reverse(commits)
-  -- Create the new branch at the parent of the oldest selected commit so the
-  -- cherry-pick onto it is a clean fast-forward.
-  local start = ordered[1] .. "^"
+  local prompt = ("Create branch from %d cherr%s starting at"):format(#commits, #commits > 1 and "ies" or "y")
+  local upstream = git.branch.upstream()
+  local refs =
+    util.deduplicate(util.merge({ upstream }, git.refs.list_branches(), git.refs.list_tags(), { "HEAD" }))
 
-  git.cherry_pick.move(ordered, src, name, popup:get_arguments(), start, checkout)
+  local start = FuzzyFinderBuffer.new(refs):open_async { prompt_prefix = prompt }
+  if not start then
+    return
+  end
+
+  local name = input.get_user_input("Name for new branch", {
+    strip_spaces = true,
+    default = suggest_branch_name(start),
+  })
+  if not name or name == "" then
+    return
+  end
+
+  git.cherry_pick.move(commits, src, name, popup:get_arguments(), start, checkout)
 end
 
 ---@param popup PopupData
 function M.spinout(popup)
-  spin(popup, false)
+  spin(popup, "Spinout", false)
 end
 
 ---@param popup PopupData
 function M.spinoff(popup)
-  spin(popup, true)
+  spin(popup, "Spinoff", true)
 end
 
 function M.continue()
