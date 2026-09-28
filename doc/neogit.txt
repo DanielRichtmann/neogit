@@ -2353,6 +2353,10 @@ Mappings (normal mode):
                    In all cases the change is applied to the working tree only;
                    nothing is staged.
 
+                   In visual mode, only the selected lines are reversed. A
+                   selection may span several hunks and files; a closed fold
+                   within the selection counts as fully selected.
+
   • Popup shortcuts honour |neogit_setup_mappings|, default keys:
       - `A` Cherry-pick, `b` Branch, `B` Bisect, `c` Commit, `d` Diff,
         `f` Fetch, `i` Ignore, `l` Log, `m` Merge, `p` Pull, `P` Push,

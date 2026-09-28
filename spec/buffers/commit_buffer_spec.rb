@@ -186,5 +186,54 @@ RSpec.describe "Commit Buffer", :git, :nvim do
       nvim.keys("-")
       await { expect(File.read("testfile")).to eq("") }
     end
+
+    describe "a visual selection" do
+      before do
+        File.write("testfile", "one\ntwo\nthree\n")
+        File.write("other", "a\nb\n")
+        git.add(%w[testfile other])
+        git.commit("second commit")
+
+        nvim.keys("<esc>")
+        nvim.lua("require('neogit.buffers.commit_view').new('HEAD'):open()")
+        nvim.confirm(true)
+      end
+
+      # The diff is taller than the screen, so search the buffer rather than the screen
+      def move_to(line)
+        nvim.fn("search", ["\\V\\^#{line}\\$", "cw"])
+      end
+
+      it "reverses only the selected addition" do
+        move_to("+two")
+        nvim.keys("V-")
+        await do
+          expect(File.read("testfile")).to eq("one\nthree\n")
+          expect(File.read("other")).to eq("a\nb\n")
+        end
+      end
+
+      it "reverses a selected deletion and addition" do
+        move_to("-hello, world")
+        nvim.keys("Vj-")
+        await { expect(File.read("testfile")).to eq("hello, world\ntwo\nthree\n") }
+      end
+
+      it "reverses selected lines across files" do
+        move_to("+b")
+        nvim.keys("V4j-") # +b, "modified testfile", hunk header, -hello, world, +one
+        await do
+          expect(File.read("other")).to eq("a\n")
+          expect(File.read("testfile")).to eq("hello, world\ntwo\nthree\n")
+        end
+      end
+
+      it "does nothing when no changed lines are selected" do
+        move_to("@@ -1 +1,3 @@")
+        nvim.keys("V-")
+        expect(nvim.errors).to be_empty
+        expect(File.read("testfile")).to eq("one\ntwo\nthree\n")
+      end
+    end
   end
 end
