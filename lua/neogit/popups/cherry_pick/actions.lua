@@ -62,6 +62,9 @@ local function get_cherries(popup, verb)
   else
     local refs = util.merge(popup.state.env.commits, git.refs.list_branches())
     local ref = FuzzyFinderBuffer.new(refs):open_async { prompt_prefix = verb .. " cherry" }
+    if not ref then
+      return {}
+    end
 
     if ref == popup.state.env.commits[1] then
       commits = popup.state.env.commits
@@ -82,6 +85,10 @@ end
 ---@param popup PopupData
 function M.donate(popup)
   local commits = get_cherries(popup, "Donate")
+  if not commits[1] then
+    return
+  end
+
   local src = git.branch.current() or git.rev_parse.oid("HEAD")
 
   if not git.log.is_ancestor(commits[1], git.rev_parse.oid(src)) then
@@ -109,6 +116,9 @@ function M.harvest(popup)
   end
 
   local commits = get_cherries(popup, "Harvest")
+  if not commits[1] then
+    return
+  end
 
   if git.log.is_ancestor(commits[1], git.rev_parse.oid("HEAD")) then
     return notification.error("Cannot harvest cherries that are reachable from HEAD")
