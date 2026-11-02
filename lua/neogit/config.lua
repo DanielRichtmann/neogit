@@ -313,6 +313,15 @@ end
 ---| "DeleteBranch"
 ---| false
 ---| fun()
+---
+---@alias NeogitConfigMappingsCommitView
+---| "OpenFileInWorktree"
+---| "OpenCommitLinkInBrowser"
+---| "AddToPatch"
+---| "RemoveFromPatch"
+---| "CustomPatchPopup"
+---| false
+---| fun()
 
 ---@alias NeogitGraphStyle
 ---| "ascii"
@@ -345,6 +354,7 @@ end
 ---@field commit_editor? { [string]: NeogitConfigMappingsCommitEditor } A dictionary that uses Commit editor commands to set a single keybind
 ---@field commit_editor_I? { [string]: NeogitConfigMappingsCommitEditor_I } A dictionary that uses Commit editor commands to set a single keybind
 ---@field refs_view? { [string]: NeogitConfigMappingsRefsView } A dictionary that uses Refs view editor commands to set a single keybind
+---@field commit_view? { [string]: NeogitConfigMappingsCommitView } A dictionary that uses Commit view commands to set a single keybind
 
 ---@class NeogitConfigGitService
 ---@field pull_request? string
@@ -619,6 +629,9 @@ function M.get_default_values()
       commit_view = {
         ["a"] = "OpenFileInWorktree",
         ["o"] = "OpenCommitLinkInBrowser",
+        ["s"] = "AddToPatch",
+        ["u"] = "RemoveFromPatch",
+        ["C"] = "CustomPatchPopup",
       },
       commit_editor = {
         ["q"] = "Close",

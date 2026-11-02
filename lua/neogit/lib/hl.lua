@@ -207,6 +207,7 @@ function M.setup(config)
     NeogitDiffDeleteCursor         = { bg = palette.bg1, fg = palette.red, ctermfg = 1 },
     NeogitDiffAddInline            = { bg = palette.inline_green, fg = palette.line_green, bold = palette.bold },
     NeogitDiffDeleteInline         = { bg = palette.inline_red, fg = palette.bg0, bold = palette.bold },
+    NeogitCustomPatch              = { reverse = true, bold = palette.bold },
     NeogitPopupSectionTitle        = { link = "Function" },
     NeogitPopupBranchName          = { link = "String" },
     NeogitPopupBold                = { bold = palette.bold },

@@ -236,4 +236,152 @@ RSpec.describe "Commit Buffer", :git, :nvim do
       end
     end
   end
+
+  describe "custom patch" do
+    before do
+      File.write("testfile", "one\ntwo\nthree\n")
+      File.write("other", "a\nb\n")
+      git.add(%w[testfile other])
+      git.commit("second commit")
+
+      nvim.keys("<esc>")
+      nvim.lua("require('neogit.buffers.commit_view').new('HEAD'):open()")
+      nvim.confirm(true)
+    end
+
+    # The diff is taller than the screen, so search the buffer rather than the screen
+    def move_to(line)
+      nvim.fn("search", ["\\V\\^#{line}\\$", "cw"])
+    end
+
+    def summary
+      nvim.lua("local p = require('neogit.lib.custom_patch').get() return p and p:summary() or ''")
+    end
+
+    def names_in(rev)
+      `git show --format= --name-only #{rev}`.split("\n")
+    end
+
+    it "adds the hunk under the cursor" do
+      move_to("+b")
+      nvim.keys("s")
+      expect(summary).to eq("1 file, +2 -0")
+    end
+
+    it "adds a whole file from its header" do
+      move_to("modified testfile")
+      nvim.keys("s")
+      expect(summary).to eq("1 file, +3 -1")
+    end
+
+    it "adds every file from the commit metadata" do
+      nvim.keys("gg")
+      nvim.keys("s")
+      expect(summary).to eq("2 files, +5 -1")
+    end
+
+    it "adds the selected lines" do
+      move_to("+two")
+      nvim.keys("Vjs")
+      expect(summary).to eq("1 file, +2 -0")
+    end
+
+    it "removes the hunk under the cursor" do
+      nvim.keys("gg")
+      nvim.keys("s")
+      move_to("+b")
+      nvim.keys("u")
+      expect(summary).to eq("1 file, +3 -1")
+    end
+
+    it "removes the selected lines" do
+      move_to("modified testfile")
+      nvim.keys("s")
+      move_to("+two")
+      nvim.keys("Vu")
+      expect(summary).to eq("1 file, +2 -1")
+    end
+
+    it "adds a file from the list of changed files" do
+      nvim.keys("gg")
+      nvim.fn("search", ["other", "cw"])
+      nvim.keys("s")
+      expect(summary).to eq("1 file, +2 -0")
+    end
+
+    it "highlights the lines that are part of the patch" do
+      move_to("+b")
+      nvim.keys("s")
+      marks = nvim.lua(<<~LUA)
+        local ns = vim.api.nvim_get_namespaces()["neogit-buffer-" .. vim.api.nvim_get_current_buf() .. "-CustomPatch"]
+        return #vim.api.nvim_buf_get_extmarks(0, ns, 0, -1, {})
+      LUA
+      expect(marks).to eq(2)
+    end
+
+    it "does not open the popup without a patch" do
+      nvim.keys("C")
+      expect(nvim.filetype).to eq("NeogitCommitView")
+    end
+
+    describe "popup" do
+      before do
+        move_to("+b")
+        nvim.keys("s")
+        nvim.keys("C")
+      end
+
+      it "opens" do
+        expect(nvim.filetype).to eq("NeogitPopup")
+        expect(nvim.errors).to be_empty
+      end
+
+      it "renders the patch summary and actions" do
+        screen = nvim.screen.join("\n")
+        expect(screen).to match(/Patch from \h+ \(1 file, \+2 -0\)/)
+        expect(screen).to include("d remove from commit", "n move into new commit", "i move into index",
+                                  "c move into other commit", "x discard patch")
+      end
+
+      it "removes the patch from the commit" do
+        nvim.keys("d")
+        await do
+          expect(names_in("HEAD")).to eq(["testfile"])
+          expect(File.exist?("other")).to be(false)
+        end
+      end
+
+      it "moves the patch into a new commit" do
+        nvim.input("split")
+        nvim.keys("n")
+        await do
+          expect(git.log(1).first.message).to eq("split")
+          expect(names_in("HEAD")).to eq(["other"])
+          expect(names_in("HEAD~1")).to eq(["testfile"])
+        end
+      end
+
+      it "moves the patch into the index" do
+        nvim.keys("i")
+        await do
+          expect(names_in("HEAD")).to eq(["testfile"])
+          expect(git.status.added.keys).to include("other")
+        end
+      end
+
+      it "moves the patch into another commit" do
+        nvim.keys("c")
+        nvim.keys("j<cr>") # The second commit in the list is "Initial commit"
+        await do
+          expect(names_in("HEAD~1")).to contain_exactly("other", "testfile")
+          expect(names_in("HEAD")).to eq(["testfile"])
+        end
+      end
+
+      it "discards the patch" do
+        nvim.keys("x")
+        expect(summary).to eq("")
+      end
+    end
+  end
 end

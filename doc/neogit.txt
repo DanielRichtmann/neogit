@@ -27,6 +27,7 @@ CONTENTS                                                       *neogit_contents*
        • Branch Config                              |neogit_branch_config_popup|
        • Cherry Pick                                  |neogit_cherry_pick_popup|
        • Commit                                            |neogit_commit_popup|
+       • Custom Patch                                |neogit_custom_patch_popup|
        • Diff                                                |neogit_diff_popup|
        • Fetch                                              |neogit_fetch_popup|
        • Ignore                                            |neogit_ignore_popup|
@@ -415,6 +416,9 @@ The following mappings can all be customized via the setup function.
 
       commit_view = {
         ["a"]          = "OpenFileInWorktree",
+        ["s"]          = "AddToPatch",
+        ["u"]          = "RemoveFromPatch",
+        ["C"]          = "CustomPatchPopup",
       }
 
       rebase_editor = {
@@ -855,6 +859,9 @@ NeogitDiffDeleteInline
 COMMIT BUFFER
 NeogitFilePath              Applied to filepath
 NeogitCommitViewHeader      Applied to header of Commit View
+NeogitCustomPatch           Applied to the "+" or "-" of lines that are part
+                            of the custom patch, see
+                            |neogit_custom_patch_popup|
 
 LOG VIEW BUFFER
 NeogitGraphAuthor           Applied to the commit's author in graph view
@@ -1467,6 +1474,70 @@ Actions:                                           *neogit_commit_popup_actions*
 
   • Instant Squash                                *neogit_commit_instant_squash*
     Similar to |neogit_commit_squash|, but instantly rebases after.
+
+==============================================================================
+Custom Patch Popup                                 *neogit_custom_patch_popup*
+
+A custom patch is a selection of changes taken from a single commit: whole
+files, whole hunks, or individual lines. Once built, it can be removed from
+that commit, or moved into a new commit, the index, or another commit. This
+is the equivalent of lazygit's "custom patches".
+
+Patches are built in the |neogit_commit_buffer|:
+  • `s` adds the hunk under the cursor, the file when on a file header or
+    on a file in the list of changed files, or every file of the commit when
+    on the commit's metadata. In visual mode, it adds the selected lines.
+  • `u` removes changes from the patch in the same way.
+  • `C` opens this popup.
+
+Lines that are part of the patch have their leading "+" or "-" highlighted
+with `NeogitCustomPatch`. There is only one custom patch at a time. It is kept
+when the commit buffer is closed, so it can be acted upon later. Adding
+changes from another commit asks to discard the existing patch first.
+
+New, deleted and renamed files, as well as binary files, can only be part of
+a patch as a whole. Selecting some of their lines adds the whole file.
+
+How history is rewritten:                        *neogit_custom_patch_rewrite*
+  The patch is applied to (or removed from) every affected commit with git's
+  plumbing commands, without checking anything out. Rewritten commits keep
+  their author, author date and message, and HEAD is moved with a single
+  `git update-ref`, so the previous state can be found in the reflog. A
+  commit that ends up without changes is dropped.
+
+  The working tree is only changed when the patch is removed altogether, so
+  uncommitted changes elsewhere are kept. Nothing is changed unless the whole
+  operation succeeds.
+
+  If a later commit changed the same lines, the patch no longer applies to
+  that commit and the action is refused rather than stopping with a conflict.
+  The same goes for history between the commits that contains merge commits,
+  and while a rebase, merge, cherry-pick or revert is in progress.
+
+Actions:                                   *neogit_custom_patch_popup_actions*
+  • Remove from commit                            *neogit_custom_patch_remove*
+    Removes the patch from its commit. The changes are also removed from
+    the index and the working tree, unless uncommitted changes there are in
+    the way, in which case nothing is changed.
+
+  • Move into new commit                      *neogit_custom_patch_new_commit*
+    Removes the patch from its commit and puts it into a new commit right
+    after it. The user is prompted for the message of the new commit, which
+    defaults to the subject of the original commit. The new commit has the
+    same author as the original commit. The index and working tree are not
+    changed.
+
+  • Move into index                                *neogit_custom_patch_index*
+    Removes the patch from its commit and leaves its changes staged, ready
+    to be committed elsewhere. The working tree is not changed.
+
+  • Move into other commit                  *neogit_custom_patch_other_commit*
+    Prompts for a commit on the current branch and moves the patch into it.
+    The commit can be older or newer than the one the patch was taken from.
+    The index and working tree are not changed.
+
+  • Discard patch                                *neogit_custom_patch_discard*
+    Forgets the custom patch without changing anything in the repository.
 
 ==============================================================================
 Diff Popup                                                   *neogit_diff_popup*
@@ -2364,6 +2435,18 @@ Mappings (normal mode):
                    In visual mode, only the selected lines are reversed. A
                    selection may span several hunks and files; a closed fold
                    within the selection counts as fully selected.
+
+  • `s`            Add the change at point to the custom patch.
+                   (|neogit_setup_mappings|: "AddToPatch" in commit_view)
+                   Works on the same granularities as `-`, including visual
+                   selections. See |neogit_custom_patch_popup|.
+
+  • `u`            Remove the change at point from the custom patch.
+                   (|neogit_setup_mappings|: "RemoveFromPatch" in commit_view)
+
+  • `C`            Open the Custom Patch popup.
+                   (|neogit_setup_mappings|: "CustomPatchPopup" in
+                   commit_view)
 
   • Popup shortcuts honour |neogit_setup_mappings|, default keys:
       - `A` Cherry-pick, `b` Branch, `B` Bisect, `c` Commit, `d` Diff,

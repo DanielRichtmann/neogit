@@ -216,6 +216,8 @@ end
 ---@field cached self
 ---@field reverse self
 ---@field index self
+---@field check self
+---@field recount self
 ---@field with_patch fun(string): self alias for input
 
 ---@class GitCommandAdd: GitCommandBuilder
@@ -279,8 +281,11 @@ end
 ---@field no_gpg_sign self
 ---@field parent fun(parent: string): self
 ---@field message fun(message: string): self
+---@field file fun(path: string): self Read the commit message from a file
 ---@field parents fun(...): self
 ---@field tree fun(tree: string): self
+
+---@class GitCommandCatFile: GitCommandBuilder
 
 ---@class GitCommandUpdateIndex: GitCommandBuilder
 ---@field add self
@@ -361,6 +366,7 @@ end
 ---@field bisect         GitCommandBisect
 ---@field branch         GitCommandBranch
 ---@field checkout       GitCommandCheckout
+---@field cat-file       GitCommandCatFile
 ---@field checkout-index GitCommandCheckoutIndex
 ---@field cherry         GitCommandCherry
 ---@field cherry-pick    GitCommandCherryPick
@@ -727,6 +733,8 @@ local configurations = {
       cached = "--cached",
       reverse = "--reverse",
       index = "--index",
+      check = "--check",
+      recount = "--recount",
     },
     aliases = {
       with_patch = function(tbl)
@@ -863,6 +871,8 @@ local configurations = {
 
   ["write-tree"] = config {},
 
+  ["cat-file"] = config {},
+
   ["commit-tree"] = config {
     flags = {
       no_gpg_sign = "--no-gpg-sign",
@@ -870,6 +880,7 @@ local configurations = {
     short_opts = {
       parent = "-p",
       message = "-m",
+      file = "-F",
     },
     aliases = {
       parents = function(tbl)

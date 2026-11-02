@@ -10,6 +10,7 @@ local commit_view_maps = require("neogit.config").get_reversed_commit_view_maps(
 local notification = require("neogit.lib.notification")
 local jump = require("neogit.lib.jump")
 local util = require("neogit.lib.util")
+local custom_patch = require("neogit.lib.custom_patch")
 
 local api = vim.api
 
@@ -22,6 +23,7 @@ local api = vim.api
 ---@field committer_email string
 ---@field committer_date string
 ---@field description table
+---@field diffs Diff[]
 
 ---@class CommitOverview
 ---@field summary string a short summary about what happened
@@ -40,6 +42,7 @@ local api = vim.api
 --- @field buffer Buffer
 --- @field open fun(self, kind?: string)
 --- @field close fun()
+--- @field render_patch fun(self)
 --- @see CommitInfo
 --- @see Buffer
 --- @see Ui
@@ -151,8 +154,189 @@ function M:update(commit_id, filter)
   self.buffer.ui:render(
     unpack(ui.CommitView(self.commit_info, self.commit_overview, self.commit_signature, self.item_filter))
   )
+  self:render_patch()
 
   self.buffer:win_call(vim.cmd, "normal! gg")
+end
+
+---Calls `fn` for every hunk component in the layout
+---@param component Component
+---@param fn fun(component: Component)
+local function each_hunk_component(component, fn)
+  if component.options and component.options.hunk then
+    fn(component)
+  elseif component.children then
+    for _, child in ipairs(component.children) do
+      each_hunk_component(child, fn)
+    end
+  end
+end
+
+---Highlights the lines that are part of the custom patch, if it was taken from this commit
+function M:render_patch()
+  if not self.buffer then
+    return
+  end
+
+  self.buffer:clear_namespace("CustomPatch")
+
+  local patch = custom_patch.get()
+  if not patch or patch.commit ~= self.commit_info.oid then
+    return
+  end
+
+  local ns = self.buffer:get_namespace_id("CustomPatch")
+  if not ns then
+    return
+  end
+
+  each_hunk_component(self.buffer.ui.layout, function(component)
+    local hunk = component.options.hunk
+    -- The first row of a hunk component is its header, so row `header + n` holds `hunk.lines[n]`
+    local header = component:row_range_abs()
+
+    for index in ipairs(hunk.lines) do
+      if patch:contains_line(hunk, index) then
+        -- Rows are 1-based, extmarks are 0-based. Highlight the leading "+" or "-".
+        self.buffer:set_extmark(ns, header + index - 1, 0, {
+          end_col = 1,
+          hl_group = "NeogitCustomPatch",
+          priority = 300,
+        })
+      end
+    end
+  end)
+end
+
+---@class CustomPatchTarget
+---@field diff Diff
+---@field hunk? Hunk When nil, the whole file is meant
+---@field from? integer First selected line, as index into `hunk.lines`. When nil, the whole hunk is meant
+---@field to? integer Last selected line, as index into `hunk.lines`
+
+---@param self CommitViewBuffer
+---@param file string
+---@return Diff|nil
+local function find_diff(self, file)
+  for _, diff in ipairs(self.commit_info.diffs) do
+    if diff.file == file then
+      return diff
+    end
+  end
+end
+
+---Returns what the cursor is on: a hunk, a file, or every file of the commit when on its metadata.
+---@param self CommitViewBuffer
+---@return CustomPatchTarget[]
+local function patch_targets_under_cursor(self)
+  local item = self.buffer.ui:get_hunk_or_filename_under_cursor()
+  if item and item.hunk then
+    local diff = find_diff(self, item.hunk.file)
+    return diff and { { diff = diff, hunk = item.hunk } } or {}
+  end
+
+  local diff_component = self.buffer.ui:get_component_under_cursor(function(c)
+    return c.options.diff ~= nil
+  end)
+
+  if diff_component then
+    return { { diff = diff_component.options.diff } }
+  end
+
+  -- A file in the list of changed files at the top
+  local path_component = self.buffer.ui:get_component_under_cursor(function(c)
+    return c.options.highlight == "NeogitFilePath"
+  end)
+
+  if path_component then
+    local diff = find_diff(self, vim.trim(path_component.value))
+    return diff and { { diff = diff } } or {}
+  end
+
+  return util.map(self.commit_info.diffs, function(diff)
+    return { diff = diff }
+  end)
+end
+
+---Returns the changed lines within the visual selection.
+---@param self CommitViewBuffer
+---@return CustomPatchTarget[]
+local function patch_targets_in_selection(self)
+  local targets = {}
+
+  for _, selected in ipairs(self.buffer.ui:get_hunks_in_selection()) do
+    local diff = find_diff(self, selected.hunk.file)
+    if diff then
+      table.insert(targets, { diff = diff, hunk = selected.hunk, from = selected.from, to = selected.to })
+    end
+  end
+
+  return targets
+end
+
+---Adds changes to, or removes them from, the custom patch.
+---@param self CommitViewBuffer
+---@param targets CustomPatchTarget[]
+---@param add boolean
+local function update_patch(self, targets, add)
+  if #targets == 0 then
+    notification.info("No changes selected")
+    return
+  end
+
+  local oid = self.commit_info.oid
+  local patch = custom_patch.get()
+
+  if patch and patch.commit ~= oid then
+    if not add then
+      notification.info(("The custom patch is for %s"):format(git.rev_parse.abbreviate_commit(patch.commit)))
+      return
+    end
+
+    local message = ("Discard the custom patch for %s and start a new one?"):format(
+      git.rev_parse.abbreviate_commit(patch.commit)
+    )
+
+    if not input.get_permission(message) then
+      return
+    end
+
+    custom_patch.reset()
+  end
+
+  if not add and not patch then
+    return
+  end
+
+  patch = custom_patch.get_or_create(oid)
+
+  local whole_files = {}
+  for _, target in ipairs(targets) do
+    if not target.hunk then
+      if add then
+        patch:add_file(target.diff)
+      else
+        patch:remove_file(target.diff)
+      end
+    else
+      local whole
+      if add then
+        whole = patch:add_lines(target.diff, target.hunk, target.from, target.to)
+      else
+        whole = patch:remove_lines(target.diff, target.hunk, target.from, target.to)
+      end
+
+      if whole and target.from then
+        whole_files[target.diff.file] = true
+      end
+    end
+  end
+
+  for _, file in ipairs(vim.tbl_keys(whole_files)) do
+    notification.info(("%q can only be part of a custom patch as a whole"):format(file))
+  end
+
+  self:render_patch()
 end
 
 ---Generate a callback to re-open CommitViewBuffer in the current commit
@@ -490,6 +674,15 @@ function M:open(kind)
         [status_maps["Toggle"]] = function()
           pcall(vim.cmd, "normal! za")
         end,
+        [commit_view_maps["AddToPatch"]] = a.void(function()
+          update_patch(self, patch_targets_under_cursor(self), true)
+        end),
+        [commit_view_maps["RemoveFromPatch"]] = a.void(function()
+          update_patch(self, patch_targets_under_cursor(self), false)
+        end),
+        [commit_view_maps["CustomPatchPopup"]] = popups.open("custom_patch", function(p)
+          p { patch = custom_patch.get() }
+        end),
         [status_maps["Reverse"]] = a.void(function()
           local item = self.buffer.ui:get_hunk_or_filename_under_cursor()
           local message, hunks
@@ -532,13 +725,24 @@ function M:open(kind)
 
           reverse_hunks(hunks, "Reverse selection?")
         end),
+        [commit_view_maps["AddToPatch"]] = a.void(function()
+          update_patch(self, patch_targets_in_selection(self), true)
+        end),
+        [commit_view_maps["RemoveFromPatch"]] = a.void(function()
+          update_patch(self, patch_targets_in_selection(self), false)
+        end),
       },
     },
     render = function()
       return ui.CommitView(self.commit_info, self.commit_overview, self.commit_signature, self.item_filter)
     end,
-    after = function()
+    after = function(buffer)
       vim.cmd("normal! zR")
+
+      -- Called before `Buffer.create()` returns, so `self.buffer` is not set yet
+      self.buffer = buffer
+      buffer:create_namespace("CustomPatch")
+      self:render_patch()
     end,
   }
 

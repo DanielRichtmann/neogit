@@ -6,6 +6,7 @@
 ---@field cherry_pick NeogitGitCherryPick
 ---@field cli         NeogitGitCLI
 ---@field config      NeogitGitConfig
+---@field custom_patch NeogitGitCustomPatch
 ---@field diff        NeogitGitDiff
 ---@field fetch       NeogitGitFetch
 ---@field files       NeogitGitFiles

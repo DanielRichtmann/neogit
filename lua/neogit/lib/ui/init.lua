@@ -146,6 +146,7 @@ end
 ---@field from number start offset from the first line of the hunk
 ---@field to number end offset from the first line of the hunk
 ---@field lines string[]
+---@field hunk? Hunk The selected hunk itself, set by `Ui:get_hunks_in_selection()`
 ---
 ---@param item StatusItem
 ---@param first_line number
